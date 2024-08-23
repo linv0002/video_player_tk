@@ -1,11 +1,11 @@
 import tkinter as tk
 from tkinter import filedialog, Menu, PhotoImage
+import tkinter.ttk as ttk  # Import ttk for Combobox
 import vlc
 import yt_dlp
 import time
 import logging
 import sys
-
 
 class VideoPlayer:
     def __init__(self, root):
@@ -84,6 +84,17 @@ class VideoPlayer:
         self.fast_forward_button = tk.Button(self.left_control_frame, image=self.fast_forward_icon,
                                              command=lambda: self.seek_video(10))
         self.fast_forward_button.pack(side=tk.LEFT, padx=5)
+
+        # Playback Speed Control (Dropdown)
+        self.speed_label = tk.Label(self.control_frame, text="Speed:")
+        self.speed_label.pack(side=tk.LEFT, padx=(5, 0))
+
+        self.speed_var = tk.StringVar()
+        self.speed_dropdown = ttk.Combobox(self.control_frame, textvariable=self.speed_var, state="readonly")
+        self.speed_dropdown['values'] = ('0.5x', '0.75x', '1x', '1.25x', '1.5x', '2x')
+        self.speed_dropdown.current(2)  # Default to 1x speed
+        self.speed_dropdown.pack(side=tk.LEFT, padx=(0, 5))
+        self.speed_dropdown.bind("<<ComboboxSelected>>", self.change_speed)
 
         # Mute/Unmute button on the far right
         self.mute_button = tk.Button(self.right_control_frame, image=self.volume_icon, command=self.toggle_mute)
@@ -235,6 +246,14 @@ class VideoPlayer:
 
     def format_time(self, seconds):
         return time.strftime("%H:%M:%S", time.gmtime(seconds))
+
+    def change_speed(self, event):
+        try:
+            # Extract the speed multiplier from the dropdown text (e.g., '0.5x' -> 0.5)
+            speed = float(self.speed_var.get().replace('x', ''))
+            self.player.set_rate(speed)
+        except Exception as e:
+            logging.error(f"Error changing playback speed: {e}")
 
     def on_closing(self):
         try:
