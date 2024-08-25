@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, Menu, PhotoImage, messagebox
-import tkinter.ttk as ttk  # Import ttk for Combobox
+import tkinter.ttk as ttk
 import vlc
 import yt_dlp
 import time
@@ -23,8 +23,8 @@ class VideoPlayer:
         self.playlist_width = 300  # Width of the playlist panel
         self.min_width = 800  # Minimum width for the window without playlist
         self.playlist_dir = os.path.join(os.getcwd(), "playlists")  # Default playlist directory
-        self.cache_dir = os.path.join(os.getcwd(), "cache")  # Cache directory
         self.last_opened_dir = os.path.expanduser("~")  # Default to home directory initially
+        self.cache_dir = os.path.join(os.getcwd(), "cache")  # Cache directory
 
         # Create playlist and cache directories if they don't exist
         if not os.path.exists(self.playlist_dir):
@@ -157,8 +157,8 @@ class VideoPlayer:
         self.playlist_scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
 
         # Bind double-click and Enter key events to play the selected item in the playlist
-        self.playlist_listbox.bind("<Double-1>", self.play_selected_item)
-        self.playlist_listbox.bind("<Return>", self.play_selected_item)
+        self.playlist_listbox.bind("<Double-1>", self.on_playlist_select)
+        self.playlist_listbox.bind("<Return>", self.on_playlist_select)
 
         # Bind mouse wheel for scrolling
         self.playlist_listbox.bind("<MouseWheel>", self.scroll_playlist)
@@ -173,7 +173,8 @@ class VideoPlayer:
         self.add_youtube_button = tk.Button(self.playlist_control_frame, text="Add YouTube", command=self.add_youtube_to_playlist)
         self.add_youtube_button.grid(row=0, column=1, padx=5, pady=2)
 
-        self.load_playlist_button = tk.Button(self.playlist_control_frame, text="Load Playlist", command=self.load_playlist)
+        self.load_playlist_button = tk.Button(self.playlist_control_frame, text="Load Playlist",
+                                              command=self.load_playlist if self.cache_var.get() == 0 else self.load_playlist_cached)
         self.load_playlist_button.grid(row=1, column=0, padx=5, pady=2)
 
         self.save_playlist_button = tk.Button(self.playlist_control_frame, text="Save Playlist", command=self.save_playlist)
@@ -185,8 +186,13 @@ class VideoPlayer:
         self.edit_playlist_button = tk.Button(self.playlist_control_frame, text="Edit Playlist", command=self.edit_playlist)
         self.edit_playlist_button.grid(row=2, column=1, padx=5, pady=2)
 
-        self.delete_playlist_button = tk.Button(self.playlist_control_frame, text="Delete Playlist", command=self.delete_playlist)
-        self.delete_playlist_button.grid(row=3, column=0, padx=5, pady=2)
+        self.clear_playlist_button = tk.Button(self.playlist_control_frame, text="Clear Playlist",
+                                               command=self.clear_playlist)
+        self.clear_playlist_button.grid(row=3, column=0, padx=5, pady=2)
+
+        self.delete_playlist_button = tk.Button(self.playlist_control_frame, text="Delete Playlist",
+                                                command=self.delete_playlist)
+        self.delete_playlist_button.grid(row=3, column=1, padx=5, pady=2)
 
         # Checkbox to show/hide playlist
         self.show_playlist_var = tk.IntVar(value=0)
@@ -312,7 +318,71 @@ class VideoPlayer:
         self.main_frame.pack(fill=tk.BOTH, expand=1)
         self.control_frame.pack(pady=10, fill=tk.X)
 
-    def play_youtube_video(self, event=None, add_to_playlist=True):
+    def play_youtube_video(self, event=None):
+        if self.cache_var.get() == 1:
+            self.play_youtube_video_cached(event)
+        else:
+            self.play_youtube_video_noncached(event)
+
+    def play_youtube_video_noncached(self, event=None):
+        url = self.url_entry.get()
+        if url:
+            try:
+                ydl_opts = {'extract_flat': False, 'force_generic_extractor': False}
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info_dict = ydl.extract_info(url, download=False)
+
+                    if 'entries' in info_dict:
+                        # It's a playlist, add all videos to the existing playlist
+                        initial_playlist_size = self.playlist_listbox.size()
+
+                        for entry in info_dict['entries']:
+                            video_url = f"https://www.youtube.com/watch?v={entry['id']}"
+                            video_title = entry['title']
+
+                            # Check if the video is cached
+                            video_hash = hashlib.md5(video_url.encode()).hexdigest()
+                            cache_path = os.path.join(self.cache_dir, f"{video_hash}.mp4")
+
+                            if os.path.exists(cache_path):
+                                # If cached, play from cache
+                                logging.info(f"Playing cached video: {cache_path}")
+                                self.add_to_playlist(cache_path, video_title)
+                            else:
+                                # Otherwise, add the video URL to the playlist for streaming
+                                self.add_to_playlist(video_url, video_title)
+
+                        # Automatically play the first video from the newly added playlist
+                        self.playlist_listbox.selection_clear(0, tk.END)  # Clear any previous selection
+                        self.playlist_listbox.selection_set(initial_playlist_size)  # Select the first newly added item
+                        self.playlist_listbox.activate(initial_playlist_size)
+                        self.play_selected_item_noncached()  # Play the selected item
+
+                    else:
+                        # It's a single video, check if it's cached
+                        video_hash = hashlib.md5(url.encode()).hexdigest()
+                        cache_path = os.path.join(self.cache_dir, f"{video_hash}.mp4")
+
+                        if os.path.exists(cache_path):
+                            # If cached, play from cache
+                            logging.info(f"Playing cached video: {cache_path}")
+                            self.play_local_video(cache_path)
+                        else:
+                            # Otherwise, stream it directly
+                            video_url = info_dict['url']
+                            media = self.instance.media_new(video_url)
+                            self.player.set_media(media)
+                            self.player.set_hwnd(self.canvas.winfo_id())  # Embed in canvas
+                            self.player.play()
+
+                        # Add to playlist only if played from URL entry
+                        if event:
+                            self.add_to_playlist(url, info_dict.get('title', ''))
+
+            except Exception as e:
+                logging.error(f"Error playing YouTube video: {e}")
+
+    def play_youtube_video_cached(self, event=None):
         url = self.url_entry.get()
         if url:
             try:
@@ -329,27 +399,30 @@ class VideoPlayer:
                         first_video_played = False
 
                         for i, entry in enumerate(info_dict['entries']):
-                            video_url = f"https://www.youtube.com/watch?v={entry['id']}"
-                            video_title = entry['title']
-                            video_hash = hashlib.md5(video_url.encode()).hexdigest()
-                            cache_path = os.path.join(self.cache_dir, f"{video_hash}.mp4")
+                            # Ensure only video entries are processed
+                            if entry.get('_type') == 'url':
+                                video_url = f"https://www.youtube.com/watch?v={entry['id']}"
+                                video_title = entry['title']
+                                video_hash = hashlib.md5(video_url.encode()).hexdigest()
+                                cache_path = os.path.join(self.cache_dir, f"{video_hash}.mp4")
 
-                            # Always add to the application's playlist
-                            self.add_to_playlist(video_url, video_title)
+                                # Always add to the application's playlist
+                                self.add_to_playlist(video_url, video_title)
 
-                            if i == 0:
-                                # Check if the first video is cached and play it immediately
-                                if os.path.exists(cache_path):
-                                    logging.info(f"Playing cached video: {cache_path}")
-                                    self.play_local_video(cache_path)
-                                    first_video_played = True
+                                if i == 0:
+                                    # Check if the first video is cached and play it immediately
+                                    if os.path.exists(cache_path):
+                                        logging.info(f"Playing cached video: {cache_path}")
+                                        self.play_local_video(cache_path)
+                                        first_video_played = True
+                                    else:
+                                        logging.info(f"Downloading first video: {video_url}")
+                                        self.download_and_play_first_video(video_url, cache_path)
                                 else:
-                                    logging.info(f"Downloading first video: {video_url}")
-                                    self.download_and_play_first_video(video_url, cache_path)
-                            else:
-                                # For subsequent videos, download if not cached
-                                if not os.path.exists(cache_path):
-                                    threading.Thread(target=self.download_video, args=(video_url, cache_path)).start()
+                                    # For subsequent videos, download if not cached
+                                    if not os.path.exists(cache_path):
+                                        threading.Thread(target=self.download_video,
+                                                         args=(video_url, cache_path)).start()
 
                         if first_video_played:
                             return
@@ -365,9 +438,9 @@ class VideoPlayer:
                         else:
                             self.download_and_play_first_video(url, cache_path)
 
-                        if add_to_playlist:
-                            video_title = info_dict.get('title', url)
-                            self.add_to_playlist(url, video_title)
+                        # Ensure single video is added to playlist
+                        video_title = info_dict.get('title', url)
+                        self.add_to_playlist(url, video_title)
 
             except Exception as e:
                 logging.error(f"Error playing YouTube video: {e}")
@@ -375,7 +448,7 @@ class VideoPlayer:
     def download_and_play_first_video(self, video_url, cache_path):
         """Download the first video and play it immediately if not cached, otherwise play from cache."""
         try:
-            if cache_path and os.path.exists(cache_path):
+            if os.path.exists(cache_path):
                 logging.info(f"Playing cached video: {cache_path}")
                 self.play_local_video(cache_path)
             else:
@@ -400,6 +473,8 @@ class VideoPlayer:
                 with yt_dlp.YoutubeDL(ydl_opts_video) as ydl_video:
                     ydl_video.download([video_url])
                     logging.info(f"Background video download completed: {video_url}")
+            else:
+                logging.info(f"Video already in cache: {cache_path}")
 
         except Exception as e:
             logging.error(f"Error downloading video in background: {e}")
@@ -444,7 +519,25 @@ class VideoPlayer:
                 if self.playlist:
                     self.playlist_listbox.selection_set(0)  # Select the first item
                     self.playlist_listbox.activate(0)
-                    self.play_selected_item()  # Play the selected item
+                    self.play_selected_item_noncached()  # Play the first video using non-cached logic
+
+    def load_playlist_cached(self):
+        playlist_file = filedialog.askopenfilename(initialdir=self.playlist_dir,
+                                                   title="Select Playlist",
+                                                   filetypes=(("JSON Files", "*.json"), ("All Files", "*.*")))
+        if playlist_file:
+            with open(playlist_file, 'r') as file:
+                self.playlist = json.load(file)
+                self.playlist_listbox.delete(0, tk.END)
+                for item in self.playlist:
+                    display_text = item["description"] if item["description"] else item["url"]
+                    self.playlist_listbox.insert(tk.END, display_text)
+
+                # Automatically play the first video in the playlist if it exists
+                if self.playlist:
+                    self.playlist_listbox.selection_set(0)  # Select the first item
+                    self.playlist_listbox.activate(0)
+                    self.play_selected_item_cached()  # Play the selected item
 
     def save_playlist(self):
         playlist_file = filedialog.asksaveasfilename(initialdir=self.playlist_dir,
@@ -454,6 +547,10 @@ class VideoPlayer:
         if playlist_file:
             with open(playlist_file, 'w') as file:
                 json.dump(self.playlist, file, indent=4)
+
+    def clear_playlist(self):
+        self.playlist_listbox.delete(0, tk.END)  # Clear the listbox
+        self.playlist = []  # Clear the underlying playlist list
 
     def delete_playlist(self):
         playlist_file = filedialog.askopenfilename(initialdir=self.playlist_dir,
@@ -472,25 +569,67 @@ class VideoPlayer:
             del self.playlist[selected[0]]
             self.playlist_listbox.delete(selected)
 
-    def play_selected_item(self, event=None):
+    def play_selected_item_noncached(self, event=None):
         selected_index = self.playlist_listbox.curselection()
         if selected_index:
             selected_item = self.playlist[selected_index[0]]
             url = selected_item["url"]
 
-            # Check if the video is already cached
+            # Check if the video is in the cache
             video_path = self.get_cached_video_path(url)
-
             if video_path:
-                # Play from the cached file
+                # Play from cache
                 self.play_local_video(video_path)
-            elif url.startswith("http"):
-                # If not cached, stream or download from the URL
-                self.url_entry.delete(0, tk.END)
-                self.url_entry.insert(0, url)
-                self.play_youtube_video(event=None, add_to_playlist=False)  # Prevent adding to playlist again
             else:
+                # Stream the video if not in the cache
+                if url.startswith("http"):
+                    self.url_entry.delete(0, tk.END)
+                    self.url_entry.insert(0, url)
+                    self.stream_video(url)  # Stream the video directly
+                else:
+                    self.play_local_video(url)
+
+    def stream_video(self, url):
+        try:
+            ydl_opts = {'extract_flat': False, 'force_generic_extractor': False}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info_dict = ydl.extract_info(url, download=False)
+                video_url = info_dict['url']
+                media = self.instance.media_new(video_url)
+                self.player.set_media(media)
+                self.player.set_hwnd(self.canvas.winfo_id())  # Embed in canvas
+                self.player.play()
+        except Exception as e:
+            logging.error(f"Error streaming video: {e}")
+
+    def play_selected_item_cached(self, event=None):
+        selected_index = self.playlist_listbox.curselection()
+        if selected_index:
+            selected_item = self.playlist[selected_index[0]]
+            url = selected_item["url"]
+
+            # Cached logic only
+            if url.startswith("http"):
+                video_hash = hashlib.md5(url.encode()).hexdigest()
+                cached_video_path = os.path.join(self.cache_dir, f"{video_hash}.mp4")
+
+                if os.path.exists(cached_video_path):
+                    logging.info(f"Playing cached video: {cached_video_path}")
+                    self.play_local_video(cached_video_path)
+                else:
+                    # Stream the video from the URL
+                    logging.info(f"Streaming video from URL: {url}")
+                    self.play_youtube_video_cached(event=None)
+            else:
+                # It's a local file, play it directly
+                logging.info(f"Playing local video: {url}")
                 self.play_local_video(url)
+
+    def on_playlist_select(self, event=None):
+        if self.cache_var.get():
+            self.play_selected_item_cached(event)
+        else:
+            self.play_selected_item_noncached(event)
 
     def on_video_end(self):
         current_index = self.playlist_listbox.curselection()
@@ -500,7 +639,12 @@ class VideoPlayer:
                 self.playlist_listbox.selection_clear(0, tk.END)
                 self.playlist_listbox.selection_set(next_index)
                 self.playlist_listbox.activate(next_index)
-                self.play_selected_item()
+
+                # Check if cache is enabled and play the next video accordingly
+                if self.cache_var.get():
+                    self.play_selected_item_cached()
+                else:
+                    self.play_selected_item_noncached()
             else:
                 self.stop_video()  # Stop the video if no more videos in the playlist
         else:
