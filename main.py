@@ -589,6 +589,7 @@ class VideoPlayer:
 
         except Exception as e:
             logging.error(f"Error downloading or playing the first video: {e}")
+            messagebox.showerror("Error", "Failed to download or play video.")
 
     def download_video(self, video_url, cache_path):
         """Download subsequent videos to the cache directory in the background."""
@@ -735,8 +736,7 @@ class VideoPlayer:
             selected_item = self.playlist[selected_index[0]]
             url = selected_item["url"]
 
-            # Cached logic only
-            if url.startswith("http"):
+            if url.startswith("http"):  # It's a YouTube video
                 video_hash = hashlib.md5(url.encode()).hexdigest()
                 cached_video_path = os.path.join(self.cache_dir, f"{video_hash}.mp4")
 
@@ -744,9 +744,9 @@ class VideoPlayer:
                     logging.info(f"Playing cached video: {cached_video_path}")
                     self.play_local_video(cached_video_path)
                 else:
-                    # Stream the video from the URL
-                    logging.info(f"Streaming video from URL: {url}")
-                    self.play_youtube_video_cached(event=None)
+                    logging.info(f"Video not cached, downloading: {url}")
+                    # Download the video and play it
+                    self.download_and_play_first_video(url, cached_video_path)
             else:
                 # It's a local file, play it directly
                 logging.info(f"Playing local video: {url}")
