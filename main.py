@@ -20,6 +20,21 @@ class VideoPlayer:
         self.root.title("Video Player")
         self.root.geometry("800x600")
 
+        # Initialize cache warning elements to None
+        self.cache_warning_frame = None
+        self.cache_warning_label = None
+        self.clear_cache_button = None
+
+        # Initialize attributes that will be used in load_config
+        self.playlist_width = 300  # Width of the playlist panel
+        self.min_width = 800  # Minimum width for the window without playlist
+        self.playlist_dir = os.path.join(os.getcwd(), "playlists")  # Default playlist directory
+        self.last_opened_dir = os.path.expanduser("~")  # Default to home directory initially
+        self.cache_dir = os.path.join(os.getcwd(), "cache")  # Cache directory
+
+        # Load configurations from config.json
+        self.load_config()
+
         self.playlist_width = 300  # Width of the playlist panel
         self.min_width = 800  # Minimum width for the window without playlist
         self.playlist_dir = os.path.join(os.getcwd(), "playlists")  # Default playlist directory
@@ -143,6 +158,11 @@ class VideoPlayer:
         self.cache_checkbox = tk.Checkbutton(self.url_frame, text="Cache Video", variable=self.cache_var)
         self.cache_checkbox.pack(side=tk.LEFT, padx=10)
 
+        # Cache warning and clear button (initially hidden)
+        self.cache_warning_frame = None
+        self.cache_warning_label = None
+        self.clear_cache_button = None
+
         # Playlist Frame (initially hidden)
         self.playlist_frame = tk.Frame(self.main_frame, width=self.playlist_width)
 
@@ -212,18 +232,125 @@ class VideoPlayer:
         # Playlist data
         self.playlist = []
 
+        # Check cache size on startup
+        self.check_cache_size()  # Ensure this is called to check cache size immediately
+
     def setup_logger(self):
         # Create a logger
-        logging.basicConfig(filename="video_player.log",
-                            format='%(asctime)s - %(levelname)s - %(message)s',
-                            level=logging.DEBUG)
+        log_file = "video_player.log"
+
+        # Set up the file handler with write mode ('w')
+        handler = logging.FileHandler(log_file, mode='w')
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+
+        # Add the handler to the root logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(handler)
 
         # Redirect stdout and stderr to the logger
-        sys.stdout = LoggerWriter(logging.info)
-        sys.stderr = LoggerWriter(logging.error)
+        sys.stdout = LoggerWriter(logger.info)
+        sys.stderr = LoggerWriter(logger.error)
 
         # Override the exception hook
         sys.excepthook = self.handle_exception
+
+    def load_config(self):
+        """Load configuration from config.json."""
+        try:
+            # Get the absolute path of the config file
+            config_path = os.path.abspath("config.json")  # Adjust the path if necessary
+            logging.info(f"Attempting to load configuration from {config_path}")
+
+            # Print the absolute path to verify it's pointing to the correct file
+            print(f"Loading config from: {config_path}")
+
+            # Open and load the config file
+            with open(config_path, "r") as f:
+                config = json.load(f)
+                logging.info(f"Configuration loaded: {config}")
+
+                # Retrieve values from the config, with defaults
+                self.default_playlist_path = config.get("default_playlist_path", self.playlist_dir)
+                self.max_cache_size_mb = config.get("max_cache_size_mb", 500)
+
+                # Log the retrieved values
+                logging.info(f"Default Playlist Path: {self.default_playlist_path}")
+                logging.info(f"Max Cache Size (from config): {self.max_cache_size_mb} MB")
+
+        except FileNotFoundError:
+            logging.error(f"Config file not found: {config_path}, using default values.")
+            self.max_cache_size_mb = 500
+        except json.JSONDecodeError as e:
+            logging.error(f"Error decoding JSON from config file: {e}, using default values.")
+            self.max_cache_size_mb = 500
+        except Exception as e:
+            logging.error(f"Unexpected error loading config: {e}, using default values.")
+            self.max_cache_size_mb = 500
+
+    def check_cache_size(self):
+        """Check the cache size and display a warning if it exceeds the max size."""
+        cache_size_mb = self.get_cache_size_mb()
+        logging.info(f"Current cache size: {cache_size_mb:.2f} MB")
+
+        # Debugging: Print the values being compared
+        print(f"Max cache size (from config): {self.max_cache_size_mb} MB")
+        print(f"Current cache size: {cache_size_mb} MB")
+
+        # Correct comparison to check if cache size exceeds the limit
+        if cache_size_mb > self.max_cache_size_mb:
+            self.show_cache_warning(cache_size_mb)
+        else:
+            # If the cache size is within limits, remove the warning if it exists
+            self.remove_cache_warning()
+
+    def get_cache_size_mb(self):
+        """Calculate the total cache size in MB."""
+        total_size = 0
+        for dirpath, dirnames, filenames in os.walk(self.cache_dir):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                total_size += os.path.getsize(fp)
+        return total_size / (1024 * 1024)
+
+    def show_cache_warning(self, cache_size_mb):
+        """Display a warning about the cache size and add a button to clear the cache."""
+        if not self.cache_warning_frame:
+            self.cache_warning_frame = tk.Frame(self.root)
+            self.cache_warning_frame.pack(fill=tk.X, padx=10, pady=5)
+
+            self.cache_warning_label = tk.Label(self.cache_warning_frame,
+                                                text=f"Cache Warning: Current cache size is {cache_size_mb:.2f} MB.")
+            self.cache_warning_label.pack(side=tk.LEFT)
+
+            self.clear_cache_button = tk.Button(self.cache_warning_frame, text="Clear Cache", command=self.clear_cache)
+            self.clear_cache_button.pack(side=tk.LEFT, padx=10)
+
+    def clear_cache(self):
+        """Clear the cache directory and remove the warning."""
+        try:
+            for filename in os.listdir(self.cache_dir):
+                file_path = os.path.join(self.cache_dir, filename)
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    os.rmdir(file_path)
+            logging.info("Cache cleared.")
+            self.remove_cache_warning()
+        except Exception as e:
+            logging.error(f"Error clearing cache: {e}")
+
+    def remove_cache_warning(self):
+        """Remove the cache warning and clear cache button."""
+        if self.cache_warning_frame:
+            self.cache_warning_frame.destroy()
+            self.cache_warning_frame = None
+            self.cache_warning_label = None
+            self.clear_cache_button = None
+
+            # No need to manually adjust the window size
+            # self.root.update_idletasks() # Optional: Force update of the layout to reflect the removed widgets
 
     def handle_exception(self, exc_type, exc_value, exc_traceback):
         logging.critical("Uncaught exception",
@@ -796,7 +923,6 @@ class VideoPlayer:
             self.root.destroy()
         except Exception as e:
             logging.error(f"Error on closing application: {e}")
-
 
 class LoggerWriter:
     def __init__(self, level):
