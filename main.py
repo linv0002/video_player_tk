@@ -10,6 +10,8 @@ import os
 import json
 import hashlib
 import threading
+from googleapiclient.discovery import build
+import credentials
 
 class VideoPlayer:
     def __init__(self, root):
@@ -19,6 +21,13 @@ class VideoPlayer:
         self.root = root
         self.root.title("Video Player")
         self.root.geometry("800x600")
+
+        # set youtube api key
+        self.youtube_api_key = credentials.youTubeKey
+        self.youtube = build('youtube', 'v3', developerKey=self.youtube_api_key)
+
+        self.search_type_var = tk.StringVar(value="video")
+        self.number_of_videos_var = tk.IntVar(value=10)
 
         # Initialize cache warning elements to None
         self.cache_warning_frame = None
@@ -152,6 +161,11 @@ class VideoPlayer:
         self.url_entry = tk.Entry(self.url_frame, width=50)
         self.url_entry.pack(side=tk.LEFT, fill=tk.X, expand=1)
         self.url_entry.bind("<Return>", self.play_youtube_video)
+
+        # search button
+        self.search_icon = PhotoImage(file="search_icon.png")  # Load your search icon image
+        self.search_button = tk.Button(self.url_frame, image=self.search_icon, command=self.open_search_window)
+        self.search_button.pack(side=tk.LEFT, padx=5)  # Add a small padding for spacing
 
         # Cache checkbox
         self.cache_var = tk.IntVar(value=1)  # Default to caching enabled
@@ -905,24 +919,402 @@ class VideoPlayer:
             display_text = item["description"] if item["description"] else item["url"]
             self.playlist_listbox.insert(tk.END, display_text)
 
+    def open_search_window(self):
+        # Create a new top-level window for search
+        search_window = tk.Toplevel(self.root)
+        search_window.title("YouTube Search")
+        search_window.geometry("600x600")  # Set the window size appropriately
+
+        # Section 1: Search Label and Entry
+        search_label = tk.Label(search_window, text="Search YouTube:")
+        search_label.pack(anchor="w", pady=10, padx=10)
+
+        search_entry = tk.Entry(search_window, width=50)
+        search_entry.pack(pady=5, padx=10, fill=tk.X)
+
+        # Bind the Enter key to execute the search when pressed
+        search_entry.bind("<Return>", lambda event: self.search_youtube(search_entry.get(), results_listbox))
+
+        # Search Button
+        search_button = tk.Button(search_window, text="Search",
+                                  command=lambda: self.search_youtube(search_entry.get(), results_listbox))
+        search_button.pack(pady=5, padx=10)
+
+        # Section 2: Favorites Dropdown
+        favorites_label = tk.Label(search_window, text="Favorites:")
+        favorites_label.pack(anchor="w", pady=5, padx=10)
+
+        self.favorites_var = tk.StringVar(search_window)
+        favorites_dropdown = ttk.Combobox(search_window, textvariable=self.favorites_var, state="readonly", width=50)
+        self.update_favorites_dropdown(favorites_dropdown)
+        favorites_dropdown.pack(pady=5, padx=10, fill=tk.X)
+
+        # Bind the selection event to load the favorite
+        favorites_dropdown.bind("<<ComboboxSelected>>",
+                                lambda event: self.load_favorite(favorites_dropdown, search_entry, results_listbox))
+
+        # Section 3: Favorites Buttons
+        favorites_buttons_frame = tk.Frame(search_window)
+        favorites_buttons_frame.pack(pady=5, padx=10, fill=tk.X)
+
+        add_to_favorites_button = tk.Button(favorites_buttons_frame, text="Add to Favorites",
+                                            command=lambda: self.add_to_favorites(search_entry.get()))
+        add_to_favorites_button.pack(side=tk.LEFT, padx=5)
+
+        edit_favorites_button = tk.Button(favorites_buttons_frame, text="Edit Favorites", command=self.edit_favorites)
+        edit_favorites_button.pack(side=tk.LEFT, padx=5)
+
+        # Section 4: Search Type (Video or Playlist)
+        search_type_frame = tk.Frame(search_window)
+        search_type_frame.pack(pady=5, padx=10, fill=tk.X)
+
+        video_radio = tk.Radiobutton(search_type_frame, text="Videos", variable=self.search_type_var, value="video")
+        playlist_radio = tk.Radiobutton(search_type_frame, text="Playlists", variable=self.search_type_var,
+                                        value="playlist")
+
+        video_radio.pack(side=tk.LEFT)
+        playlist_radio.pack(side=tk.LEFT)
+
+        # Section 5: Number of Results Dropdown
+        number_of_videos_label = tk.Label(search_window, text="Number of Results:")
+        number_of_videos_label.pack(anchor="w", pady=5, padx=10)
+
+        number_of_videos_dropdown = ttk.Combobox(search_window, textvariable=self.number_of_videos_var,
+                                                 state="readonly")
+        number_of_videos_dropdown['values'] = (5, 10, 15, 20, 25)
+        number_of_videos_dropdown.pack(pady=5, padx=10, fill=tk.X)
+
+        # Section 6: Results Listbox with Scrollbars
+        results_frame = tk.Frame(search_window)
+        results_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
+
+        results_listbox = tk.Listbox(results_frame, width=80, height=15, selectmode=tk.EXTENDED)
+        results_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar_y = tk.Scrollbar(results_frame, orient=tk.VERTICAL, command=results_listbox.yview)
+        scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        scrollbar_x = tk.Scrollbar(results_frame, orient=tk.HORIZONTAL, command=results_listbox.xview)
+        scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+
+        results_listbox.config(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+
+        # Section 7: Add to Playlist Button
+        add_to_playlist_button = tk.Button(search_window, text="Add to Playlist",
+                                           command=lambda: self.add_search_result_to_playlist(results_listbox))
+        add_to_playlist_button.pack(pady=5, padx=10, anchor="center")
+
+        print("Search window layout completed.")  # Debugging line to ensure the function completes
+
+    def update_favorites_dropdown(self, dropdown):
+        """Updates the favorites dropdown with the latest list of favorite searches."""
+        favorites = self.load_favorites()
+        favorite_titles = [f"{fav['description']} ({fav['type']})" for fav in favorites]
+        dropdown['values'] = favorite_titles
+        if favorite_titles:
+            dropdown.current(0)  # Set the first favorite as the default selected value
+
+    def load_favorite(self, dropdown, search_entry, results_listbox):
+        """Loads the selected favorite search into the search bar and automatically executes the search."""
+        selected_index = dropdown.current()
+        favorites = self.load_favorites()
+
+        if selected_index >= 0 and selected_index < len(favorites):
+            selected_favorite = favorites[selected_index]
+
+            # Load the favorite's search query into the search bar
+            search_entry.delete(0, tk.END)
+            search_entry.insert(0, selected_favorite['search'])
+
+            # Set the search type (video or playlist)
+            self.search_type_var.set(selected_favorite['type'])
+
+            # Automatically execute the search
+            self.search_youtube(selected_favorite['search'], results_listbox)
+        else:
+            print("No valid favorite selected.")
+
+    def search_youtube(self, query, results_listbox):
+        results_listbox.delete(0, tk.END)
+
+        # Get the number of results and search type (video or playlist)
+        max_results = self.number_of_videos_var.get()
+        search_type = self.search_type_var.get()
+
+        # Use the YouTube API to search for videos or playlists
+        search_response = self.youtube.search().list(
+            q=query,
+            part='snippet',
+            maxResults=max_results,
+            type=search_type
+        ).execute()
+
+        search_results = []
+        for item in search_response.get('items', []):
+            item_id = item['id']['videoId'] if search_type == "video" else item['id']['playlistId']
+            item_title = item['snippet']['title']
+            item_url = f"https://www.youtube.com/{'watch?v=' if search_type == 'video' else 'playlist?list='}{item_id}"
+            search_results.append({"title": item_title, "url": item_url})
+
+        for result in search_results:
+            results_listbox.insert(tk.END, f"{result['title']} ({result['url']})")
+
+        results_listbox.results = search_results
+
+    def is_video_downloadable(self, url):
+        ydl_opts = {'quiet': True}  # Suppress output
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info_dict = ydl.extract_info(url, download=False)
+                formats = info_dict.get('formats', None)
+                if formats:
+                    # Filter for formats that have both video and audio
+                    downloadable_formats = [f for f in formats if f.get('vcodec') != 'none' and f.get('acodec') != 'none']
+                    return bool(downloadable_formats)  # Return True if downloadable formats exist
+        except Exception as e:
+            print(f"Failed to check downloadability for {url}: {e}")
+        return False
+
+    def add_search_result_to_playlist(self, results_listbox):
+        selected_indices = results_listbox.curselection()
+        if selected_indices:
+            for index in selected_indices:
+                selected_result = results_listbox.results[index]
+                if self.search_type_var.get() == "video":
+                    if self.is_video_downloadable(selected_result['url']):
+                        self.add_to_playlist(selected_result['url'], selected_result['title'])
+                    else:
+                        messagebox.showwarning("Download Error", f"'{selected_result['title']}' is not downloadable.")
+                elif self.search_type_var.get() == "playlist":
+                    # Directly handle the playlist URL as if it was entered in the YouTube URL box
+                    self.handle_playlist_url(selected_result['url'])
+
+    def load_favorites(self):
+        """Load favorites from a JSON file."""
+        try:
+            with open("favorites.json", "r") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+
+    def save_favorites(self, favorites):
+        """Save favorites to a JSON file."""
+        with open("favorites.json", "w") as f:
+            json.dump(favorites, f, indent=4)
+
+    def add_to_favorites(self, search_query):
+        if not search_query.strip():
+            messagebox.showwarning("Warning", "Search query cannot be empty.")
+            return
+
+        description = search_query  # Use the search query as the default description; can be updated in the edit window
+        search_type = self.search_type_var.get()
+
+        # Load existing favorites
+        favorites = self.load_favorites()
+
+        # Add the new favorite to the list
+        favorites.append({
+            "description": description,
+            "search": search_query,
+            "type": search_type
+        })
+
+        # Save the updated favorites
+        self.save_favorites(favorites)
+
+        messagebox.showinfo("Success", "Search added to favorites.")
+
+    def edit_favorites(self):
+        edit_window = tk.Toplevel(self.root)
+        edit_window.title("Edit Favorites")
+
+        # Create a temporary copy of the favorites list
+        temp_favorites = self.load_favorites()
+
+        # Create a frame to hold the grid
+        grid_frame = tk.Frame(edit_window)
+        grid_frame.pack(fill=tk.BOTH, expand=1, padx=10, pady=10)
+
+        # Headers
+        tk.Label(grid_frame, text="Description", width=25).grid(row=0, column=0, padx=5, pady=5)
+        tk.Label(grid_frame, text="Query", width=50).grid(row=0, column=1, padx=5, pady=5)
+        tk.Label(grid_frame, text="Type", width=10).grid(row=0, column=2, padx=5, pady=5)
+
+        # Create a list of entries for editing
+        description_entries = []
+        query_entries = []
+        type_vars = []
+
+        def update_temp_favorite(index):
+            """Updates the temporary list based on the content of the entries."""
+            new_description = description_entries[index].get()
+            new_query = query_entries[index].get()
+            new_type = type_vars[index].get()
+            temp_favorites[index] = {"description": new_description, "search": new_query, "type": new_type}
+
+        # Populate the grid with favorites
+        for i, fav in enumerate(temp_favorites):
+            # Description entry
+            description_entry = tk.Entry(grid_frame, width=25)
+            description_entry.grid(row=i + 1, column=0, padx=5, pady=5)
+            description_entry.insert(0, fav["description"])
+            description_entry.bind("<Return>", lambda event, idx=i: update_temp_favorite(idx))
+            description_entries.append(description_entry)
+
+            # Query entry
+            query_entry = tk.Entry(grid_frame, width=50)
+            query_entry.grid(row=i + 1, column=1, padx=5, pady=5)
+            query_entry.insert(0, fav["search"])
+            query_entry.bind("<Return>", lambda event, idx=i: update_temp_favorite(idx))
+            query_entries.append(query_entry)
+
+            # Type radio buttons
+            type_var = tk.StringVar(value=fav["type"])
+            video_radio = tk.Radiobutton(grid_frame, text="Video", variable=type_var, value="video")
+            playlist_radio = tk.Radiobutton(grid_frame, text="Playlist", variable=type_var, value="playlist")
+            video_radio.grid(row=i + 1, column=2, sticky="w")
+            playlist_radio.grid(row=i + 1, column=2, sticky="e")
+            type_vars.append(type_var)
+
+        def save_and_close():
+            # Save the temporary favorites list to the original file
+            self.save_favorites(temp_favorites)
+            # Update the favorites dropdown with the new list
+            self.update_favorites_dropdown(self.favorites_var)
+            edit_window.destroy()
+
+        # Buttons for controlling the list
+        control_frame = tk.Frame(edit_window)
+        control_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        move_up_button = tk.Button(control_frame, text="Move Up",
+                                   command=lambda: move_up(description_entries, query_entries, type_vars, grid_frame))
+        move_up_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+        move_down_button = tk.Button(control_frame, text="Move Down",
+                                     command=lambda: move_down(description_entries, query_entries, type_vars,
+                                                               grid_frame))
+        move_down_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+        delete_button = tk.Button(control_frame, text="Delete",
+                                  command=lambda: delete_item(description_entries, query_entries, type_vars,
+                                                              grid_frame))
+        delete_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+        update_button = tk.Button(control_frame, text="Update",
+                                  command=lambda: [update_temp_favorite(i) for i in range(len(temp_favorites))])
+        update_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+        close_button = tk.Button(control_frame, text="Close", command=save_and_close)
+        close_button.pack(side=tk.RIGHT, padx=5, pady=5)
+
+        def move_up(entries_desc, entries_query, type_vars, frame):
+            selected = grid_frame.focus_get().grid_info()['row'] - 1
+            if selected > 0:
+                temp_favorites[selected], temp_favorites[selected - 1] = temp_favorites[selected - 1], temp_favorites[
+                    selected]
+                update_grid(frame, entries_desc, entries_query, type_vars)
+
+        def move_down(entries_desc, entries_query, type_vars, frame):
+            selected = grid_frame.focus_get().grid_info()['row'] - 1
+            if selected < len(temp_favorites) - 1:
+                temp_favorites[selected], temp_favorites[selected + 1] = temp_favorites[selected + 1], temp_favorites[
+                    selected]
+                update_grid(frame, entries_desc, entries_query, type_vars)
+
+        def delete_item(entries_desc, entries_query, type_vars, frame):
+            selected = grid_frame.focus_get().grid_info()['row'] - 1
+            del temp_favorites[selected]
+            update_grid(frame, entries_desc, entries_query, type_vars)
+
+        def update_grid(frame, entries_desc, entries_query, type_vars):
+            """Repopulate the grid with updated favorites."""
+            for widget in frame.winfo_children():
+                widget.destroy()
+            # Recreate the grid with updated data
+            tk.Label(frame, text="Description", width=25).grid(row=0, column=0, padx=5, pady=5)
+            tk.Label(frame, text="Query", width=50).grid(row=0, column=1, padx=5, pady=5)
+            tk.Label(frame, text="Type", width=10).grid(row=0, column=2, padx=5, pady=5)
+
+            for i, fav in enumerate(temp_favorites):
+                # Description entry
+                description_entry = tk.Entry(frame, width=25)
+                description_entry.grid(row=i + 1, column=0, padx=5, pady=5)
+                description_entry.insert(0, fav["description"])
+                description_entry.bind("<Return>", lambda event, idx=i: update_temp_favorite(idx))
+                description_entries[i] = description_entry
+
+                # Query entry
+                query_entry = tk.Entry(frame, width=50)
+                query_entry.grid(row=i + 1, column=1, padx=5, pady=5)
+                query_entry.insert(0, fav["search"])
+                query_entry.bind("<Return>", lambda event, idx=i: update_temp_favorite(idx))
+                query_entries[i] = query_entry
+
+                # Type radio buttons
+                type_var = tk.StringVar(value=fav["type"])
+                video_radio = tk.Radiobutton(frame, text="Video", variable=type_var, value="video")
+                playlist_radio = tk.Radiobutton(frame, text="Playlist", variable=type_var, value="playlist")
+                video_radio.grid(row=i + 1, column=2, sticky="w")
+                playlist_radio.grid(row=i + 1, column=2, sticky="e")
+                type_vars[i] = type_var
+
+        # Handle the window close event to ensure no changes are saved if the user closes the window
+        edit_window.protocol("WM_DELETE_WINDOW", lambda: edit_window.destroy())
+
+    def handle_playlist_url(self, url):
+        """Handles a YouTube playlist URL by invoking the existing logic for YouTube URL input."""
+        # Clear the URL entry box and insert the playlist URL
+        self.url_entry.delete(0, tk.END)
+        self.url_entry.insert(0, url)
+
+        # Trigger the existing logic to handle this URL, respecting the cached option
+        if self.cache_var.get() == 1:
+            self.play_youtube_video_cached()
+        else:
+            self.play_youtube_video_noncached()
+
     def on_closing(self):
         try:
-            # Explicitly delete images to avoid __del__ errors
-            del self.rewind_icon
-            del self.stop_icon
-            del self.play_icon
-            del self.pause_icon
-            del self.fast_forward_icon
-            del self.volume_icon
-            del self.mute_icon
-
             # Stop the player before closing the app
-            self.player.stop()
+            if self.player.is_playing():
+                self.player.stop()
+
+            # Explicitly destroy widgets that use images
+            self.rewind_button.destroy()
+            self.stop_button.destroy()
+            self.play_button.destroy()
+            self.pause_button.destroy()
+            self.fast_forward_button.destroy()
+            self.mute_button.destroy()
+
+            # Remove references to icons to allow for garbage collection
+            self.rewind_icon = None
+            self.stop_icon = None
+            self.play_icon = None
+            self.pause_icon = None
+            self.fast_forward_icon = None
+            self.volume_icon = None
+            self.mute_icon = None
+
+            # Temporarily suppress stderr to avoid Tkinter __del__ errors
+            sys.stderr = open(os.devnull, 'w')
 
             # Destroy the main window
             self.root.destroy()
+
+            # Restore stderr
+            sys.stderr.close()
+            sys.stderr = sys.__stderr__
+
         except Exception as e:
             logging.error(f"Error on closing application: {e}")
+
+        # Call the garbage collector explicitly (optional but recommended)
+        import gc
+        gc.collect()
+
 
 class LoggerWriter:
     def __init__(self, level):
