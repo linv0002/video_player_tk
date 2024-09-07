@@ -1,4 +1,5 @@
 {
     "default_playlist_path": "C:\\Users\\Eric\\PycharmProjects\\video_player_tk\\playlists",
+    "default_screenshot_path": "C:\\Users\\Eric\\PycharmProjects\\video_player_tk\\screenshots",
     "max_cache_size_mb": 500
 }

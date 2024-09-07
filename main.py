@@ -7,6 +7,7 @@ import time
 import logging
 import sys
 import os
+from PIL import ImageGrab
 import json
 import hashlib
 import threading
@@ -41,6 +42,7 @@ class VideoPlayer:
         self.last_opened_dir = os.path.expanduser("~")  # Default to home directory initially
         self.cache_dir = os.path.join(os.getcwd(), "cache")  # Cache directory
 
+        self.screenshot_dir = None  # To store the screenshot path from the config
         # Load configurations from config.json
         self.load_config()
 
@@ -261,6 +263,16 @@ class VideoPlayer:
         # Bind the F11 key to toggle fullscreen
         self.root.bind("<F11>", self.toggle_fullscreen)
 
+        # Create the screenshot directory if it doesn't exist
+        if not os.path.exists(self.screenshot_dir):
+            os.makedirs(self.screenshot_dir)
+
+        # Add the screenshot option to the "Options" menu
+        options_menu.add_command(label="Screenshot (F10)", command=self.capture_screenshot)
+
+        # Bind the F10 key to capture a screenshot
+        self.root.bind("<F10>", self.capture_screenshot)
+
         # Check cache size on startup
         self.check_cache_size()  # Ensure this is called to check cache size immediately
 
@@ -284,6 +296,27 @@ class VideoPlayer:
 
         # Override the exception hook
         sys.excepthook = self.handle_exception
+
+    def capture_screenshot(self, event=None):
+        """Capture a screenshot of the video canvas."""
+        try:
+            # Define the screenshot file name
+            screenshot_name = f"screenshot_{time.strftime('%Y%m%d_%H%M%S')}.png"
+            screenshot_path = os.path.join(self.screenshot_dir, screenshot_name)
+
+            # Get the canvas (video area) position and dimensions
+            x0 = self.canvas.winfo_rootx()
+            y0 = self.canvas.winfo_rooty()
+            x1 = x0 + self.canvas.winfo_width()
+            y1 = y0 + self.canvas.winfo_height()
+
+            # Capture the canvas (video screen) using ImageGrab
+            ImageGrab.grab(bbox=(x0, y0, x1, y1)).save(screenshot_path)
+
+            logging.info(f"Screenshot saved at {screenshot_path}")
+
+        except Exception as e:
+            logging.error(f"Error capturing screenshot: {e}")
 
     def toggle_fullscreen(self, event=None):
         """Toggle fullscreen mode."""
@@ -337,25 +370,18 @@ class VideoPlayer:
     def load_config(self):
         """Load configuration from config.json."""
         try:
-            # Get the absolute path of the config file
-            config_path = os.path.abspath("config.json")  # Adjust the path if necessary
-            logging.info(f"Attempting to load configuration from {config_path}")
-
-            # Print the absolute path to verify it's pointing to the correct file
-            print(f"Loading config from: {config_path}")
-
-            # Open and load the config file
+            config_path = os.path.abspath("config.json")
             with open(config_path, "r") as f:
                 config = json.load(f)
-                logging.info(f"Configuration loaded: {config}")
-
-                # Retrieve values from the config, with defaults
                 self.default_playlist_path = config.get("default_playlist_path", self.playlist_dir)
+                self.screenshot_dir = config.get("default_screenshot_path", "screenshots")
                 self.max_cache_size_mb = config.get("max_cache_size_mb", 500)
-
-                # Log the retrieved values
-                logging.info(f"Default Playlist Path: {self.default_playlist_path}")
-                logging.info(f"Max Cache Size (from config): {self.max_cache_size_mb} MB")
+        except FileNotFoundError:
+            logging.error("Config file not found, using default values.")
+            self.screenshot_dir = "screenshots"
+        except Exception as e:
+            logging.error(f"Unexpected error loading config: {e}")
+            self.screenshot_dir = "screenshots"
 
         except FileNotFoundError:
             logging.error(f"Config file not found: {config_path}, using default values.")
