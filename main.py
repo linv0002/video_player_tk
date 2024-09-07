@@ -246,6 +246,21 @@ class VideoPlayer:
         # Playlist data
         self.playlist = []
 
+        self.is_fullscreen = False  # Track fullscreen state
+        self.stored_geometry = None  # To store window size
+        self.playlist_visible = False  # To store playlist visibility state
+        self.menubar = menubar  # Store the menu bar for easy restoration
+
+        # Create a new Options menu
+        options_menu = Menu(self.root, tearoff=0)
+        menubar.add_cascade(label="Options", menu=options_menu)
+
+        # Add Toggle Fullscreen to the Options menu with (F11) as a reminder
+        options_menu.add_command(label="Toggle Fullscreen (F11)", command=self.toggle_fullscreen)
+
+        # Bind the F11 key to toggle fullscreen
+        self.root.bind("<F11>", self.toggle_fullscreen)
+
         # Check cache size on startup
         self.check_cache_size()  # Ensure this is called to check cache size immediately
 
@@ -269,6 +284,55 @@ class VideoPlayer:
 
         # Override the exception hook
         sys.excepthook = self.handle_exception
+
+    def toggle_fullscreen(self, event=None):
+        """Toggle fullscreen mode."""
+        self.is_fullscreen = not self.is_fullscreen  # Toggle state
+
+        if self.is_fullscreen:
+            # Store the current window geometry before going fullscreen
+            self.stored_geometry = self.root.geometry()
+
+            # Store playlist visibility state
+            self.playlist_visible = self.show_playlist_var.get()
+
+            # Remove the menu bar
+            self.root.config(menu="")
+
+            # Hide controls, YouTube URL, cache warning, and playlist
+            self.control_frame.pack_forget()  # Hide controls frame
+            self.slider_frame.pack_forget()  # Hide slider frame
+            self.url_frame.pack_forget()  # Hide YouTube URL entry frame
+            if self.cache_warning_frame:
+                self.cache_warning_frame.pack_forget()  # Hide cache warning frame
+            if self.playlist_visible:
+                self.playlist_frame.pack_forget()  # Hide playlist if visible
+
+            # Make the canvas take up the full screen
+            self.canvas.pack(fill=tk.BOTH, expand=1)  # Canvas fills the entire window
+            self.root.attributes("-fullscreen", True)
+
+        else:
+            # Exit fullscreen and restore original window geometry and visibility settings
+            self.root.attributes("-fullscreen", False)
+
+            # Restore the menu bar
+            self.root.config(menu=self.menubar)
+
+            # Restore the window geometry to its previous size
+            if self.stored_geometry:
+                self.root.geometry(self.stored_geometry)
+
+            # Restore controls, YouTube URL, cache warning, and playlist
+            self.canvas.pack_forget()  # Remove fullscreen canvas
+            self.canvas.pack(fill=tk.BOTH, expand=1)  # Repack canvas to normal
+            self.slider_frame.pack(fill=tk.X, padx=10, pady=5)  # Show slider
+            self.control_frame.pack(pady=10, fill=tk.X)  # Show controls
+            self.url_frame.pack(fill=tk.X, padx=10, pady=5)  # Show YouTube URL entry frame
+            if self.cache_warning_frame:
+                self.cache_warning_frame.pack(fill=tk.X, padx=10, pady=5)  # Show cache warning frame
+            if self.playlist_visible:
+                self.playlist_frame.pack(side=tk.RIGHT, fill=tk.Y)  # Show playlist if it was visible
 
     def load_config(self):
         """Load configuration from config.json."""
