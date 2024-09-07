@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, Menu, PhotoImage, messagebox
+from tkcalendar import DateEntry
 import tkinter.ttk as ttk
 import vlc
 import yt_dlp
@@ -1086,15 +1087,65 @@ class VideoPlayer:
         search_entry = tk.Entry(search_window, width=50)
         search_entry.pack(pady=5, padx=10, fill=tk.X)
 
-        # Bind the Enter key to execute the search when pressed
-        search_entry.bind("<Return>", lambda event: self.search_youtube(search_entry.get(), results_listbox))
+        # Section 2: Checkbox for "All Dates" and Date Range Filter in a Frame
+        filter_frame = tk.Frame(search_window)
+        filter_frame.pack(pady=10, padx=10, anchor="w")
 
-        # Search Button
-        search_button = tk.Button(search_window, text="Search",
-                                  command=lambda: self.search_youtube(search_entry.get(), results_listbox))
-        search_button.pack(pady=5, padx=10)
+        # Checkbox for "All Dates"
+        all_dates_var = tk.IntVar(value=1)  # Default to "All Dates" checked
+        all_dates_checkbox = tk.Checkbutton(filter_frame, text="All Dates", variable=all_dates_var,
+                                            command=lambda: toggle_dates())
+        all_dates_checkbox.grid(row=0, column=0, padx=5)
 
-        # Section 2: Favorites Dropdown
+        # "From Date" Label and Date Picker (DateEntry)
+        from_date_label = tk.Label(filter_frame, text="From Date:")
+        from_date_label.grid(row=0, column=1, padx=5)
+        from_date_entry = DateEntry(filter_frame, width=10, background="darkblue",
+                                    foreground="white", borderwidth=2, date_pattern="y-mm-dd")
+        from_date_entry.grid(row=0, column=2, padx=5)
+
+        # "To Date" Label and Date Picker (DateEntry)
+        to_date_label = tk.Label(filter_frame, text="To Date:")
+        to_date_label.grid(row=0, column=3, padx=5)
+        to_date_entry = DateEntry(filter_frame, width=10, background="darkblue",
+                                  foreground="white", borderwidth=2, date_pattern="y-mm-dd")
+        to_date_entry.grid(row=0, column=4, padx=5)
+
+        # "Sort By" Label and Dropdown
+        sort_by_label = tk.Label(filter_frame, text="Sort By:")
+        sort_by_label.grid(row=0, column=5, padx=5)
+        sort_by_var = tk.StringVar(search_window)
+        sort_by_dropdown = ttk.Combobox(filter_frame, textvariable=sort_by_var, state="readonly", width=10)
+        sort_by_dropdown['values'] = ('relevance', 'date', 'viewCount', 'rating')
+        sort_by_dropdown.current(0)  # Default to 'relevance'
+        sort_by_dropdown.grid(row=0, column=6, padx=5)
+
+        # Number of Results Label and Dropdown
+        number_of_videos_label = tk.Label(filter_frame, text="Results:")
+        number_of_videos_label.grid(row=0, column=7, padx=5)
+        number_of_videos_dropdown = ttk.Combobox(filter_frame, textvariable=self.number_of_videos_var, state="readonly",
+                                                 width=5)
+        number_of_videos_dropdown['values'] = (5, 10, 15, 20, 25)
+        number_of_videos_dropdown.current(1)  # Default to 10
+        number_of_videos_dropdown.grid(row=0, column=8, padx=5)
+
+        # Toggle Date Pickers based on "All Dates" checkbox
+        def toggle_dates():
+            if all_dates_var.get() == 1:  # If "All Dates" is checked
+                from_date_label.grid_remove()
+                from_date_entry.grid_remove()
+                to_date_label.grid_remove()
+                to_date_entry.grid_remove()
+            else:
+                from_date_label.grid()
+                from_date_entry.grid()
+                to_date_label.grid()
+                to_date_entry.grid()
+
+        # Initially hide date pickers if "All Dates" is checked
+        toggle_dates()
+
+        # Section 3: Favorites Dropdown
         favorites_label = tk.Label(search_window, text="Favorites:")
         favorites_label.pack(anchor="w", pady=5, padx=10)
 
@@ -1107,38 +1158,23 @@ class VideoPlayer:
         favorites_dropdown.bind("<<ComboboxSelected>>",
                                 lambda event: self.load_favorite(favorites_dropdown, search_entry, results_listbox))
 
-        # Section 3: Favorites Buttons
-        favorites_buttons_frame = tk.Frame(search_window)
-        favorites_buttons_frame.pack(pady=5, padx=10, fill=tk.X)
+        # Section 4: Search Button and Bind Enter Key
+        search_button = tk.Button(search_window, text="Search",
+                                  command=lambda: self.search_youtube(
+                                      search_entry.get(), results_listbox,
+                                      from_date_entry.get() if all_dates_var.get() == 0 else None,
+                                      to_date_entry.get() if all_dates_var.get() == 0 else None,
+                                      sort_by_var.get()))
+        search_button.pack(pady=5, padx=10)
 
-        add_to_favorites_button = tk.Button(favorites_buttons_frame, text="Add to Favorites",
-                                            command=lambda: self.add_to_favorites(search_entry.get()))
-        add_to_favorites_button.pack(side=tk.LEFT, padx=5)
+        # Bind Enter key to trigger search as well
+        search_entry.bind("<Return>", lambda event: self.search_youtube(
+            search_entry.get(), results_listbox,
+            from_date_entry.get() if all_dates_var.get() == 0 else None,
+            to_date_entry.get() if all_dates_var.get() == 0 else None,
+            sort_by_var.get()))
 
-        edit_favorites_button = tk.Button(favorites_buttons_frame, text="Edit Favorites", command=self.edit_favorites)
-        edit_favorites_button.pack(side=tk.LEFT, padx=5)
-
-        # Section 4: Search Type (Video or Playlist)
-        search_type_frame = tk.Frame(search_window)
-        search_type_frame.pack(pady=5, padx=10, fill=tk.X)
-
-        video_radio = tk.Radiobutton(search_type_frame, text="Videos", variable=self.search_type_var, value="video")
-        playlist_radio = tk.Radiobutton(search_type_frame, text="Playlists", variable=self.search_type_var,
-                                        value="playlist")
-
-        video_radio.pack(side=tk.LEFT)
-        playlist_radio.pack(side=tk.LEFT)
-
-        # Section 5: Number of Results Dropdown
-        number_of_videos_label = tk.Label(search_window, text="Number of Results:")
-        number_of_videos_label.pack(anchor="w", pady=5, padx=10)
-
-        number_of_videos_dropdown = ttk.Combobox(search_window, textvariable=self.number_of_videos_var,
-                                                 state="readonly")
-        number_of_videos_dropdown['values'] = (5, 10, 15, 20, 25)
-        number_of_videos_dropdown.pack(pady=5, padx=10, fill=tk.X)
-
-        # Section 6: Results Listbox with Scrollbars
+        # Section 5: Results Listbox with Scrollbars
         results_frame = tk.Frame(search_window)
         results_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
 
@@ -1153,12 +1189,10 @@ class VideoPlayer:
 
         results_listbox.config(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
 
-        # Section 7: Add to Playlist Button
+        # Section 6: Add to Playlist Button
         add_to_playlist_button = tk.Button(search_window, text="Add to Playlist",
                                            command=lambda: self.add_search_result_to_playlist(results_listbox))
         add_to_playlist_button.pack(pady=5, padx=10, anchor="center")
-
-        print("Search window layout completed.")  # Debugging line to ensure the function completes
 
     def update_favorites_dropdown(self, dropdown):
         """Updates the favorites dropdown with the latest list of favorite searches."""
@@ -1188,32 +1222,46 @@ class VideoPlayer:
         else:
             print("No valid favorite selected.")
 
-    def search_youtube(self, query, results_listbox):
+    def search_youtube(self, query, results_listbox, from_date, to_date, sort_by):
         results_listbox.delete(0, tk.END)
+
+        # Ensure dates are in correct format YYYY-MM-DD, otherwise ignore date filters
+        if from_date == '':
+            from_date = None
+        if to_date == '':
+            to_date = None
 
         # Get the number of results and search type (video or playlist)
         max_results = self.number_of_videos_var.get()
         search_type = self.search_type_var.get()
 
-        # Use the YouTube API to search for videos or playlists
-        search_response = self.youtube.search().list(
-            q=query,
-            part='snippet',
-            maxResults=max_results,
-            type=search_type
-        ).execute()
+        try:
+            # Use the YouTube API to search for videos or playlists
+            search_response = self.youtube.search().list(
+                q=query,
+                part='snippet',
+                maxResults=max_results,
+                type=search_type,
+                publishedAfter=f"{from_date}T00:00:00Z" if from_date else None,
+                publishedBefore=f"{to_date}T23:59:59Z" if to_date else None,
+                order=sort_by
+            ).execute()
 
-        search_results = []
-        for item in search_response.get('items', []):
-            item_id = item['id']['videoId'] if search_type == "video" else item['id']['playlistId']
-            item_title = item['snippet']['title']
-            item_url = f"https://www.youtube.com/{'watch?v=' if search_type == 'video' else 'playlist?list='}{item_id}"
-            search_results.append({"title": item_title, "url": item_url})
+            search_results = []
+            for item in search_response.get('items', []):
+                item_id = item['id']['videoId'] if search_type == "video" else item['id']['playlistId']
+                item_title = item['snippet']['title']
+                item_url = f"https://www.youtube.com/{'watch?v=' if search_type == 'video' else 'playlist?list='}{item_id}"
+                search_results.append({"title": item_title, "url": item_url})
 
-        for result in search_results:
-            results_listbox.insert(tk.END, f"{result['title']} ({result['url']})")
+            for result in search_results:
+                results_listbox.insert(tk.END, f"{result['title']} ({result['url']})")
 
-        results_listbox.results = search_results
+            results_listbox.results = search_results
+
+        except Exception as e:
+            logging.error(f"Error fetching YouTube search results: {e}")
+            messagebox.showerror("Error", "Failed to retrieve YouTube search results.")
 
     def is_video_downloadable(self, url):
         ydl_opts = {'quiet': True}  # Suppress output
