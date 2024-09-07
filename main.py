@@ -254,11 +254,11 @@ class VideoPlayer:
         self.menubar = menubar  # Store the menu bar for easy restoration
 
         # Create a new Options menu
-        options_menu = Menu(self.root, tearoff=0)
-        menubar.add_cascade(label="Options", menu=options_menu)
+        self.options_menu = Menu(self.root, tearoff=0)
+        menubar.add_cascade(label="Options", menu=self.options_menu)
 
         # Add Toggle Fullscreen to the Options menu with (F11) as a reminder
-        options_menu.add_command(label="Toggle Fullscreen (F11)", command=self.toggle_fullscreen)
+        self.options_menu.add_command(label="Toggle Fullscreen (F11)", command=self.toggle_fullscreen)
 
         # Bind the F11 key to toggle fullscreen
         self.root.bind("<F11>", self.toggle_fullscreen)
@@ -268,10 +268,24 @@ class VideoPlayer:
             os.makedirs(self.screenshot_dir)
 
         # Add the screenshot option to the "Options" menu
-        options_menu.add_command(label="Screenshot (F10)", command=self.capture_screenshot)
+        self.options_menu.add_command(label="Screenshot (F10)", command=self.capture_screenshot)
 
         # Bind the F10 key to capture a screenshot
         self.root.bind("<F10>", self.capture_screenshot)
+
+        self.loop_start = None  # Stores the start time of the loop
+        self.loop_end = None  # Stores the end time of the loop
+        self.loop_enabled = False  # Tracks whether looping is enabled
+
+        # Manually track the positions of the loop-related menu items
+        self.loop_start_index = self.options_menu.index("end") + 1  # Store the next available index
+        self.options_menu.add_command(label="Set Loop Start", command=self.set_loop_start)
+
+        self.loop_end_index = self.options_menu.index("end") + 1  # Track the next index
+        self.options_menu.add_command(label="Set Loop End", command=self.set_loop_end)
+
+        self.toggle_loop_index = self.options_menu.index("end") + 1  # Track the next index
+        self.options_menu.add_command(label="Toggle Loop (off)", command=self.toggle_loop)
 
         # Check cache size on startup
         self.check_cache_size()  # Ensure this is called to check cache size immediately
@@ -296,6 +310,49 @@ class VideoPlayer:
 
         # Override the exception hook
         sys.excepthook = self.handle_exception
+
+    def format_loop_time(self, time_in_seconds):
+        """Helper function to format time in mm:ss."""
+        mins, secs = divmod(int(time_in_seconds), 60)
+        return f"{mins}:{secs:02d}"
+
+    def set_loop_start(self):
+        """Set the start point of the loop."""
+        self.loop_start = self.player.get_time() / 1000  # Get current time in seconds
+        logging.info(f"Loop start set at {self.loop_start} seconds")
+        self.update_menu_labels()
+
+    def set_loop_end(self):
+        """Set the end point of the loop."""
+        self.loop_end = self.player.get_time() / 1000  # Get current time in seconds
+        logging.info(f"Loop end set at {self.loop_end} seconds")
+        self.update_menu_labels()
+
+    def toggle_loop(self):
+        """Enable or disable video looping."""
+        self.loop_enabled = not self.loop_enabled
+        logging.info(f"Looping {'enabled' if self.loop_enabled else 'disabled'}")
+        self.update_menu_labels()
+
+    def update_menu_labels(self):
+        """Update the labels of the loop menu items to show current start, end times and loop status."""
+        # Update Loop Start menu item
+        if self.loop_start is not None:
+            start_time_str = self.format_loop_time(self.loop_start)
+            self.options_menu.entryconfig(self.loop_start_index, label=f"Set Loop Start ({start_time_str})")
+        else:
+            self.options_menu.entryconfig(self.loop_start_index, label="Set Loop Start")
+
+        # Update Loop End menu item
+        if self.loop_end is not None:
+            end_time_str = self.format_loop_time(self.loop_end)
+            self.options_menu.entryconfig(self.loop_end_index, label=f"Set Loop End ({end_time_str})")
+        else:
+            self.options_menu.entryconfig(self.loop_end_index, label="Set Loop End")
+
+        # Update Toggle Loop menu item
+        loop_state = "on" if self.loop_enabled else "off"
+        self.options_menu.entryconfig(self.toggle_loop_index, label=f"Toggle Loop ({loop_state})")
 
     def capture_screenshot(self, event=None):
         """Capture a screenshot of the video canvas."""
@@ -882,6 +939,7 @@ class VideoPlayer:
             self.stop_video()
 
     def update_slider(self):
+        """Update the video slider and handle looping."""
         try:
             if self.player.is_playing():
                 # Update the slider without calling the command function
@@ -895,8 +953,14 @@ class VideoPlayer:
                 total_time = self.player.get_length() / 1000
                 self.timestamp_label.config(text=f"{self.format_time(current_time)}/{self.format_time(total_time)}")
 
+                # Handle loop logic
+                if self.loop_enabled and self.loop_start is not None and self.loop_end is not None:
+                    if current_time >= self.loop_end:
+                        logging.info(f"Looping back to {self.loop_start} seconds")
+                        self.player.set_time(int(self.loop_start * 1000))  # Seek to start of loop
+
                 # Check if the video has finished playing
-                if abs(current_time - total_time) < 1:  # Check if current_time is close to total_time
+                if abs(current_time - total_time) < 1:
                     self.on_video_end()
 
         except Exception as e:
