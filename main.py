@@ -1176,7 +1176,18 @@ class VideoPlayer:
         # Initially hide date pickers if "All Dates" is checked
         toggle_dates()
 
-        # Section 3: Favorites Dropdown
+        # Section 4: Search Type (Video or Playlist)
+        search_type_frame = tk.Frame(search_window)
+        search_type_frame.pack(pady=5, padx=10, fill=tk.X)
+
+        video_radio = tk.Radiobutton(search_type_frame, text="Videos", variable=self.search_type_var, value="video")
+        playlist_radio = tk.Radiobutton(search_type_frame, text="Playlists", variable=self.search_type_var,
+                                        value="playlist")
+
+        video_radio.pack(side=tk.LEFT)
+        playlist_radio.pack(side=tk.LEFT)
+
+        # Section 5: Favorites Dropdown
         favorites_label = tk.Label(search_window, text="Favorites:")
         favorites_label.pack(anchor="w", pady=5, padx=10)
 
@@ -1190,7 +1201,7 @@ class VideoPlayer:
                                 lambda event: self.load_favorite(favorites_dropdown, search_entry, results_listbox,
                                                                  show_details_var))
 
-        # Section 4: Search Button and Bind Enter Key
+        # Section 6: Search Button and Bind Enter Key
         search_button = tk.Button(search_window, text="Search",
                                   command=lambda: self.search_youtube(search_entry.get(),
                                                                       results_listbox,
@@ -1200,7 +1211,7 @@ class VideoPlayer:
                                                                       show_details_var))
         search_button.pack(pady=5, padx=10)
 
-        # Section 5: Results Listbox with Scrollbars
+        # Section 7: Results Listbox with Scrollbars
         results_frame = tk.Frame(search_window)
         results_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
 
@@ -1220,7 +1231,7 @@ class VideoPlayer:
         show_details_checkbox = tk.Checkbutton(search_window, text="Show Details", variable=show_details_var)
         show_details_checkbox.pack(pady=5, padx=10, anchor="w")
 
-        # Section 6: Add to Playlist Button
+        # Section 8: Add to Playlist Button
         add_to_playlist_button = tk.Button(search_window, text="Add to Playlist",
                                            command=lambda: self.add_search_result_to_playlist(results_listbox))
         add_to_playlist_button.pack(pady=5, padx=10, anchor="center")
