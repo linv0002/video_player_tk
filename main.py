@@ -5,6 +5,7 @@ import tkinter.ttk as ttk
 import vlc
 import yt_dlp
 import time
+import isodate
 import logging
 import sys
 import os
@@ -13,6 +14,7 @@ import json
 import hashlib
 import threading
 from googleapiclient.discovery import build
+import webbrowser
 import credentials
 
 class VideoPlayer:
@@ -1078,16 +1080,45 @@ class VideoPlayer:
         # Create a new top-level window for search
         search_window = tk.Toplevel(self.root)
         search_window.title("YouTube Search")
-        search_window.geometry("600x600")  # Set the window size appropriately
+        search_window.geometry("750x600")  # Set the window size appropriately
 
-        # Section 1: Search Label and Entry
+        # Section 1: Search Label on its own line
         search_label = tk.Label(search_window, text="Search YouTube:")
         search_label.pack(anchor="w", pady=10, padx=10)
 
-        search_entry = tk.Entry(search_window, width=50)
-        search_entry.pack(pady=5, padx=10, fill=tk.X)
+        # Section 2: Frame for the Search Bar and Favorites Buttons
+        search_frame = tk.Frame(search_window)
+        search_frame.pack(pady=5, padx=10, fill=tk.X)  # Pack the frame with padding and expand to fill X-axis
 
-        # Section 2: Checkbox for "All Dates" and Date Range Filter in a Frame
+        # Search Entry (this will expand as much as possible)
+        search_entry = tk.Entry(search_frame, width=50)
+        search_entry.grid(row=0, column=0, padx=5, sticky="ew")  # Expand horizontally (sticky="ew")
+
+        # Add to Favorites Button (aligned to the right)
+        add_favorites_button = tk.Button(search_frame, text="Add to Favorites",
+                                         command=lambda: self.add_to_favorites(search_entry.get()))
+        add_favorites_button.grid(row=0, column=1, padx=5, sticky="e")
+
+        # Edit Favorites Button (aligned to the right)
+        edit_favorites_button = tk.Button(search_frame, text="Edit Favorites", command=self.edit_favorites)
+        edit_favorites_button.grid(row=0, column=2, padx=5, sticky="e")
+
+        # Configure the grid to ensure the search entry expands properly
+        search_frame.grid_columnconfigure(0, weight=1)  # Make the search entry column expand
+        search_frame.grid_columnconfigure(1, weight=0)  # Prevent buttons from expanding
+        search_frame.grid_columnconfigure(2, weight=0)  # Prevent buttons from expanding
+
+        # Bind the Enter key to the search entry
+        search_entry.bind("<Return>", lambda event: self.search_youtube(
+            search_entry.get(),
+            results_listbox,
+            from_date_entry.get() if all_dates_var.get() == 0 else None,
+            to_date_entry.get() if all_dates_var.get() == 0 else None,
+            sort_by_var.get(),
+            show_details_var
+        ))
+
+        # Section 3: Checkbox for "All Dates" and Date Range Filter in a Frame
         filter_frame = tk.Frame(search_window)
         filter_frame.pack(pady=10, padx=10, anchor="w")
 
@@ -1154,25 +1185,20 @@ class VideoPlayer:
         self.update_favorites_dropdown(favorites_dropdown)
         favorites_dropdown.pack(pady=5, padx=10, fill=tk.X)
 
-        # Bind the selection event to load the favorite
+        # Add the favorites dropdown and bind selection to load_favorite
         favorites_dropdown.bind("<<ComboboxSelected>>",
-                                lambda event: self.load_favorite(favorites_dropdown, search_entry, results_listbox))
+                                lambda event: self.load_favorite(favorites_dropdown, search_entry, results_listbox,
+                                                                 show_details_var))
 
         # Section 4: Search Button and Bind Enter Key
         search_button = tk.Button(search_window, text="Search",
-                                  command=lambda: self.search_youtube(
-                                      search_entry.get(), results_listbox,
-                                      from_date_entry.get() if all_dates_var.get() == 0 else None,
-                                      to_date_entry.get() if all_dates_var.get() == 0 else None,
-                                      sort_by_var.get()))
+                                  command=lambda: self.search_youtube(search_entry.get(),
+                                                                      results_listbox,
+                                                                      from_date_entry.get() if all_dates_var.get() == 0 else None,
+                                                                      to_date_entry.get() if all_dates_var.get() == 0 else None,
+                                                                      sort_by_var.get(),
+                                                                      show_details_var))
         search_button.pack(pady=5, padx=10)
-
-        # Bind Enter key to trigger search as well
-        search_entry.bind("<Return>", lambda event: self.search_youtube(
-            search_entry.get(), results_listbox,
-            from_date_entry.get() if all_dates_var.get() == 0 else None,
-            to_date_entry.get() if all_dates_var.get() == 0 else None,
-            sort_by_var.get()))
 
         # Section 5: Results Listbox with Scrollbars
         results_frame = tk.Frame(search_window)
@@ -1189,10 +1215,55 @@ class VideoPlayer:
 
         results_listbox.config(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
 
+        # Add checkbox to toggle details
+        show_details_var = tk.IntVar(value=1)  # Variable to store the state of the checkbox (default to checked)
+        show_details_checkbox = tk.Checkbutton(search_window, text="Show Details", variable=show_details_var)
+        show_details_checkbox.pack(pady=5, padx=10, anchor="w")
+
         # Section 6: Add to Playlist Button
         add_to_playlist_button = tk.Button(search_window, text="Add to Playlist",
                                            command=lambda: self.add_search_result_to_playlist(results_listbox))
         add_to_playlist_button.pack(pady=5, padx=10, anchor="center")
+
+        # Create a right-click context menu
+        context_menu = tk.Menu(search_window, tearoff=0)
+        context_menu.add_command(label="Add to Playlist",
+                                 command=lambda: self.add_to_playlist_from_right_click(results_listbox))
+        context_menu.add_command(label="Open in YouTube", command=lambda: self.open_in_youtube(results_listbox))
+
+        # Bind right-click to show the context menu
+        results_listbox.bind("<Button-3>", lambda event: self.show_context_menu(event, results_listbox, context_menu))
+
+    def show_context_menu(self, event, results_listbox, context_menu):
+        # Select the item where the right-click occurred
+        try:
+            clicked_index = results_listbox.nearest(event.y)
+            results_listbox.selection_clear(0, tk.END)
+            results_listbox.selection_set(clicked_index)
+
+            # Show the context menu
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
+
+    def add_to_playlist_from_right_click(self, results_listbox):
+        # Get the selected item from the listbox
+        selected_index = results_listbox.curselection()
+        if selected_index:
+            selected_item = results_listbox.results[selected_index[0]]  # Get the corresponding result
+            video_url = selected_item['url']  # Get the video URL
+            video_title = selected_item['title']  # Get the video title
+
+            # Call your existing method to add the video to the playlist
+            self.add_to_playlist(video_url, video_title)
+
+    def open_in_youtube(self, results_listbox):
+        # Get the selected item
+        selected_index = results_listbox.curselection()
+        if selected_index:
+            selected_item = results_listbox.results[selected_index[0]]  # Get the corresponding result
+            video_url = selected_item['url']  # Get the video URL
+            webbrowser.open(video_url)  # Open the URL in the browser
 
     def update_favorites_dropdown(self, dropdown):
         """Updates the favorites dropdown with the latest list of favorite searches."""
@@ -1202,7 +1273,7 @@ class VideoPlayer:
         if favorite_titles:
             dropdown.current(0)  # Set the first favorite as the default selected value
 
-    def load_favorite(self, dropdown, search_entry, results_listbox):
+    def load_favorite(self, dropdown, search_entry, results_listbox, show_details_var):
         """Loads the selected favorite search into the search bar and automatically executes the search."""
         selected_index = dropdown.current()
         favorites = self.load_favorites()
@@ -1218,11 +1289,12 @@ class VideoPlayer:
             self.search_type_var.set(selected_favorite['type'])
 
             # Automatically execute the search
-            self.search_youtube(selected_favorite['search'], results_listbox)
+            self.search_youtube(selected_favorite['search'], results_listbox,
+                                from_date=None, to_date=None, sort_by="relevance", show_details_var=show_details_var)
         else:
             print("No valid favorite selected.")
 
-    def search_youtube(self, query, results_listbox, from_date, to_date, sort_by):
+    def search_youtube(self, query, results_listbox, from_date, to_date, sort_by, show_details_var):
         results_listbox.delete(0, tk.END)
 
         # Ensure dates are in correct format YYYY-MM-DD, otherwise ignore date filters
@@ -1231,12 +1303,10 @@ class VideoPlayer:
         if to_date == '':
             to_date = None
 
-        # Get the number of results and search type (video or playlist)
         max_results = self.number_of_videos_var.get()
         search_type = self.search_type_var.get()
 
         try:
-            # Use the YouTube API to search for videos or playlists
             search_response = self.youtube.search().list(
                 q=query,
                 part='snippet',
@@ -1252,12 +1322,39 @@ class VideoPlayer:
                 item_id = item['id']['videoId'] if search_type == "video" else item['id']['playlistId']
                 item_title = item['snippet']['title']
                 item_url = f"https://www.youtube.com/{'watch?v=' if search_type == 'video' else 'playlist?list='}{item_id}"
-                search_results.append({"title": item_title, "url": item_url})
 
+                if search_type == "video":
+                    video_details = self.youtube.videos().list(part="contentDetails,statistics", id=item_id).execute()
+                    details = video_details['items'][0]
+                    duration = details['contentDetails']['duration']
+                    formatted_duration = self.format_duration(duration)  # Use the helper function
+                    view_count = details['statistics'].get('viewCount', 'Unknown')
+                    publish_date = item['snippet']['publishedAt']
+
+                    search_results.append({
+                        "title": item_title,
+                        "url": item_url,
+                        "duration": formatted_duration,  # Store the formatted duration
+                        "view_count": view_count,
+                        "publish_date": publish_date
+                    })
+                else:
+                    search_results.append({
+                        "title": item_title,
+                        "url": item_url,
+                        "duration": 'N/A',
+                        "view_count": 'N/A',
+                        "publish_date": item['snippet']['publishedAt']
+                    })
+
+            # Insert the search results into the listbox
             for result in search_results:
                 results_listbox.insert(tk.END, f"{result['title']} ({result['url']})")
 
             results_listbox.results = search_results
+
+            # Add hover tooltips, respecting the checkbox state for showing details
+            self.add_hover_tooltips(results_listbox, show_details_var)
 
         except Exception as e:
             logging.error(f"Error fetching YouTube search results: {e}")
@@ -1477,6 +1574,75 @@ class VideoPlayer:
         else:
             self.play_youtube_video_noncached()
 
+    def add_hover_tooltips(self, results_listbox, show_details_var):
+        # Create a label for displaying the tooltip
+        # tooltip = tk.Label(results_listbox, text="", bg="yellow", wraplength=300, relief=tk.SOLID,
+        #                    borderwidth=1) # Yellow background with black text
+        # tooltip = tk.Label(results_listbox, text="", bg="#f0f0f0", fg="#333333", wraplength=300, relief=tk.SOLID,
+        #                    borderwidth=1)  # grey background with dark grey text
+        # Example for a light gray background with dark gray text
+        # tooltip = tk.Label(results_listbox, text="", bg="#e3f2fd", fg="#1a237e", wraplength=300, relief=tk.SOLID,
+        #                    borderwidth=1)
+
+        tooltip = tk.Label(results_listbox, text="", bg="#fff8e1", fg="#4e342e", wraplength=300, relief=tk.SOLID,
+                            borderwidth=1)    # Soft beige background with brown text
+
+        tooltip.place_forget()  # Hide initially
+
+        def on_hover(event):
+            if show_details_var.get():  # Only show tooltips if the checkbox is checked
+                try:
+                    # Get the index of the item under the mouse
+                    index = results_listbox.nearest(event.y)
+
+                    # Fetch the corresponding result's details
+                    if index >= 0 and index < len(results_listbox.results):
+                        result = results_listbox.results[index]
+
+                        # Create the tooltip text with video details
+                        tooltip_text = (
+                            f"Title: {result['title']}\n"
+                            f"Duration: {result['duration']}\n"
+                            f"Views: {result['view_count']}\n"
+                            f"Published on: {result['publish_date']}"
+                        )
+
+                        # Set tooltip text
+                        tooltip.config(text=tooltip_text)
+
+                        # Calculate position and display the tooltip
+                        tooltip.place(x=event.x_root - results_listbox.winfo_rootx() + 20,
+                                      y=event.y_root - results_listbox.winfo_rooty() + 20)
+                    else:
+                        tooltip.place_forget()  # Hide the tooltip if out of bounds
+                except Exception as e:
+                    logging.error(f"Error in displaying hover tooltip: {e}")
+            else:
+                tooltip.place_forget()  # Hide the tooltip if checkbox is unchecked
+
+        def on_leave(event):
+            tooltip.place_forget()  # Hide the tooltip when the mouse leaves the listbox
+
+        # Bind the hover event to the listbox
+        results_listbox.bind("<Motion>", on_hover)
+        results_listbox.bind("<Leave>", on_leave)
+
+    def parse_duration(iso_duration):
+        """Convert ISO 8601 duration (e.g., PT5M14S) to a more human-readable format."""
+        duration = isodate.parse_duration(iso_duration)
+        minutes, seconds = divmod(duration.total_seconds(), 60)
+        return f"{int(minutes)} minutes {int(seconds)} seconds"
+
+    def format_duration(self, iso_duration):
+        """Convert ISO 8601 duration (e.g., PT5M14S) to a more human-readable format."""
+        try:
+            duration = isodate.parse_duration(iso_duration)
+            minutes, seconds = divmod(duration.total_seconds(), 60)
+            return f"{int(minutes)}:{int(seconds):02d}"  # Format as MM:SS
+        except Exception as e:
+            logging.error(f"Error parsing duration {iso_duration}: {e}")
+            return "N/A"
+
     def on_closing(self):
         try:
             # Stop the player before closing the app
@@ -1517,7 +1683,6 @@ class VideoPlayer:
         import gc
         gc.collect()
 
-
 class LoggerWriter:
     def __init__(self, level):
         self.level = level
@@ -1530,6 +1695,30 @@ class LoggerWriter:
     def flush(self):
         pass
 
+class ToolTip:
+    def __init__(self, widget):
+        self.widget = widget
+        self.tipwindow = None
+
+    def show_tip(self, text):
+        if self.tipwindow or not text:
+            return
+        x, y, _, _ = self.widget.bbox("insert")
+        x = x + self.widget.winfo_rootx() + 25
+        y = y + self.widget.winfo_rooty() + 25
+        self.tipwindow = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(1)  # No window decorations
+        tw.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(tw, text=text, justify=tk.LEFT,
+                         background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                         font=("tahoma", "8", "normal"))
+        label.pack(ipadx=1)
+
+    def hide_tip(self):
+        if self.tipwindow:
+            self.tipwindow.destroy()
+        self.tipwindow = None
 
 if __name__ == "__main__":
     root = tk.Tk()
