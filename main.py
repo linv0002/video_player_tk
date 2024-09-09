@@ -1192,13 +1192,14 @@ class VideoPlayer:
         favorites_label.pack(anchor="w", pady=5, padx=10)
 
         self.favorites_var = tk.StringVar(search_window)
-        favorites_dropdown = ttk.Combobox(search_window, textvariable=self.favorites_var, state="readonly", width=50)
-        self.update_favorites_dropdown(favorites_dropdown)
-        favorites_dropdown.pack(pady=5, padx=10, fill=tk.X)
+        self.favorites_dropdown = ttk.Combobox(search_window, textvariable=self.favorites_var, state="readonly",
+                                               width=50)
+        self.update_favorites_dropdown(self.favorites_dropdown)  # Update the dropdown with initial values
+        self.favorites_dropdown.pack(pady=5, padx=10, fill=tk.X)
 
         # Add the favorites dropdown and bind selection to load_favorite
-        favorites_dropdown.bind("<<ComboboxSelected>>",
-                                lambda event: self.load_favorite(favorites_dropdown, search_entry, results_listbox,
+        self.favorites_dropdown.bind("<<ComboboxSelected>>",
+                                lambda event: self.load_favorite(self.favorites_dropdown, search_entry, results_listbox,
                                                                  show_details_var))
 
         # Section 6: Search Button and Bind Enter Key
@@ -1433,6 +1434,9 @@ class VideoPlayer:
         # Save the updated favorites
         self.save_favorites(favorites)
 
+        # Update the favorites dropdown after adding the new favorite
+        self.update_favorites_dropdown(self.favorites_dropdown)
+
         messagebox.showinfo("Success", "Search added to favorites.")
 
     def edit_favorites(self):
@@ -1487,12 +1491,16 @@ class VideoPlayer:
             playlist_radio.grid(row=i + 1, column=2, sticky="e")
             type_vars.append(type_var)
 
-        def save_and_close():
-            # Save the temporary favorites list to the original file
+        def save_changes():
+            """Update all entries and save changes."""
+            for i in range(len(temp_favorites)):
+                update_temp_favorite(i)  # Update each favorite based on user input
+
+            # Save the updated list to the file
             self.save_favorites(temp_favorites)
+
             # Update the favorites dropdown with the new list
-            self.update_favorites_dropdown(self.favorites_var)
-            edit_window.destroy()
+            self.update_favorites_dropdown(self.favorites_dropdown)
 
         # Buttons for controlling the list
         control_frame = tk.Frame(edit_window)
@@ -1512,11 +1520,11 @@ class VideoPlayer:
                                                               grid_frame))
         delete_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        update_button = tk.Button(control_frame, text="Update",
-                                  command=lambda: [update_temp_favorite(i) for i in range(len(temp_favorites))])
+        update_button = tk.Button(control_frame, text="Update", command=save_changes)
         update_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        close_button = tk.Button(control_frame, text="Close", command=save_and_close)
+        # Close button just closes the window without saving
+        close_button = tk.Button(control_frame, text="Close", command=edit_window.destroy)
         close_button.pack(side=tk.RIGHT, padx=5, pady=5)
 
         def move_up(entries_desc, entries_query, type_vars, frame):
