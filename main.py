@@ -17,6 +17,10 @@ from googleapiclient.discovery import build
 import webbrowser
 import credentials
 
+# Add the path to access Video Navigator
+sys.path.append("C:\\Users\\Eric\\PycharmProjects\\VideoNavigator_tk")
+from video_navigator import VideoNavigatorApp
+
 class VideoPlayer:
     def __init__(self, root):
         # Initialize the logger
@@ -54,6 +58,8 @@ class VideoPlayer:
         self.playlist_dir = os.path.join(os.getcwd(), "playlists")  # Default playlist directory
         self.last_opened_dir = os.path.expanduser("~")  # Default to home directory initially
         self.cache_dir = os.path.join(os.getcwd(), "cache")  # Cache directory
+
+        self.navigator_window = None  # Store the Video Navigator window
 
         # Create playlist and cache directories if they don't exist
         if not os.path.exists(self.playlist_dir):
@@ -290,6 +296,17 @@ class VideoPlayer:
         self.toggle_loop_index = self.options_menu.index("end") + 1  # Track the next index
         self.options_menu.add_command(label="Toggle Loop (off)", command=self.toggle_loop)
 
+        # Create a new Video Navigator menu
+        self.video_navigator_menu = Menu(self.root, tearoff=0)
+        menubar.add_cascade(label="Video Navigator", menu=self.video_navigator_menu)
+
+        # Button to open the Video Navigator app
+        self.video_navigator_menu.add_command(label="Open Video Navigator", command=self.open_video_navigator)
+
+        # Add the new Load Playlist from Navigator option
+        self.video_navigator_menu.add_command(label="Load Playlist from Navigator",
+                                              command=self.get_and_load_playlist_from_navigator)
+
         # Check cache size on startup
         self.check_cache_size()  # Ensure this is called to check cache size immediately
 
@@ -313,6 +330,56 @@ class VideoPlayer:
 
         # Override the exception hook
         sys.excepthook = self.handle_exception
+
+    def open_video_navigator(self):
+        if not self.navigator_window or not self.navigator_window.winfo_exists():  # Check if window is destroyed
+            self.navigator_window = tk.Toplevel(self.root)
+            self.navigator_window.geometry("800x800")
+            self.navigator_app = VideoNavigatorApp(self.navigator_window, self.load_playlist_from_navigator)
+        else:
+            self.navigator_window.lift()  # Bring the window to focus
+
+    def load_playlist_from_navigator(self, playlist_path):
+        # check if the playlist path is valid
+        if not os.path.exists(playlist_path):
+            logging.error(f"Playlist file not found: {playlist_path}. Please verify the path in the navigator.")
+            return
+
+        with open(playlist_path, 'r') as file:
+            self.playlist = json.load(file)
+            self.playlist_listbox.delete(0, tk.END)
+            for item in self.playlist:
+                display_text = item["description"] if item["description"] else item["url"]
+                self.playlist_listbox.insert(tk.END, display_text)
+
+            # Automatically play the first video in the playlist if it exists
+            if self.playlist:
+                self.playlist_listbox.selection_set(0)  # Select the first item
+                self.playlist_listbox.activate(0)
+                self.play_selected_item_noncached()  # Play the first video using non-cached logic
+
+    def get_and_load_playlist_from_navigator(self):
+        if self.navigator_app:
+            # Use the get_playlist_path function from the navigator
+            playlist_path = self.navigator_app.get_playlist_path()
+
+            if playlist_path and os.path.exists(playlist_path):
+                with open(playlist_path, 'r') as file:
+                    self.playlist = json.load(file)
+                    self.playlist_listbox.delete(0, tk.END)
+                    for item in self.playlist:
+                        display_text = item["description"] if item["description"] else item["url"]
+                        self.playlist_listbox.insert(tk.END, display_text)
+
+                    # Optionally auto-select the first video
+                    if self.playlist:
+                        self.playlist_listbox.selection_set(0)
+                        self.playlist_listbox.activate(0)
+                        self.play_selected_item_noncached()  # Play the first video
+            else:
+                logging.error("No valid playlist selected or playlist file doesn't exist.")
+        else:
+            logging.error("Video Navigator is not open.")
 
     def format_loop_time(self, time_in_seconds):
         """Helper function to format time in mm:ss."""
