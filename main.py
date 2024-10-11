@@ -695,20 +695,29 @@ class VideoPlayer:
                         initial_playlist_size = self.playlist_listbox.size()
 
                         for entry in info_dict['entries']:
-                            video_url = f"https://www.youtube.com/watch?v={entry['id']}"
-                            video_title = entry['title']
+                            video_url = None
+                            video_title = entry.get('title', 'Unknown Title')
 
-                            # Check if the video is cached
-                            video_hash = hashlib.md5(video_url.encode()).hexdigest()
-                            cache_path = os.path.join(self.cache_dir, f"{video_hash}.mp4")
+                            if 'url' in entry:
+                                video_url = f"https://www.youtube.com/watch?v={entry['id']}"
+                            elif 'formats' in entry and len(entry['formats']) > 0:
+                                # Find a format with both video and audio
+                                for fmt in entry['formats']:
+                                    if fmt.get('acodec') != 'none' and fmt.get('vcodec') != 'none':
+                                        video_url = fmt['url']
+                                        break
 
-                            if os.path.exists(cache_path):
-                                # If cached, play from cache
-                                logging.info(f"Playing cached video: {cache_path}")
-                                self.add_to_playlist(cache_path, video_title)
+                            if video_url:
+                                video_hash = hashlib.md5(video_url.encode()).hexdigest()
+                                cache_path = os.path.join(self.cache_dir, f"{video_hash}.mp4")
+
+                                if os.path.exists(cache_path):
+                                    logging.info(f"Playing cached video: {cache_path}")
+                                    self.add_to_playlist(cache_path, video_title)
+                                else:
+                                    self.add_to_playlist(video_url, video_title)
                             else:
-                                # Otherwise, add the video URL to the playlist for streaming
-                                self.add_to_playlist(video_url, video_title)
+                                logging.error(f"No playable video URL found for entry: {video_title}")
 
                         # Automatically play the first video from the newly added playlist
                         self.playlist_listbox.selection_clear(0, tk.END)  # Clear any previous selection
@@ -722,16 +731,27 @@ class VideoPlayer:
                         cache_path = os.path.join(self.cache_dir, f"{video_hash}.mp4")
 
                         if os.path.exists(cache_path):
-                            # If cached, play from cache
                             logging.info(f"Playing cached video: {cache_path}")
                             self.play_local_video(cache_path)
                         else:
                             # Otherwise, stream it directly
-                            video_url = info_dict['url']
-                            media = self.instance.media_new(video_url)
-                            self.player.set_media(media)
-                            self.player.set_hwnd(self.canvas.winfo_id())  # Embed in canvas
-                            self.player.play()
+                            video_url = None
+                            if 'url' in info_dict:
+                                video_url = info_dict['url']
+                            elif 'formats' in info_dict and len(info_dict['formats']) > 0:
+                                # Find a format with both video and audio
+                                for fmt in info_dict['formats']:
+                                    if fmt.get('acodec') != 'none' and fmt.get('vcodec') != 'none':
+                                        video_url = fmt['url']
+                                        break
+
+                            if video_url:
+                                media = self.instance.media_new(video_url)
+                                self.player.set_media(media)
+                                self.player.set_hwnd(self.canvas.winfo_id())  # Embed in canvas
+                                self.player.play()
+                            else:
+                                raise ValueError("No playable video URL with audio found.")
 
                         # Add to playlist only if played from URL entry
                         if event:
@@ -739,6 +759,7 @@ class VideoPlayer:
 
             except Exception as e:
                 logging.error(f"Error playing YouTube video: {e}")
+                messagebox.showerror("Error", "Failed to play YouTube video. Please check the link and try again.")
 
     def play_youtube_video_cached(self, event=None):
         url = self.url_entry.get()
