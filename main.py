@@ -18,7 +18,7 @@ import webbrowser
 import credentials
 
 # Add the path to access Video Navigator
-sys.path.append("C:\\Users\\Eric\\PycharmProjects\\VideoNavigator_tk")
+sys.path.append("C:\\Users\\eslin\\PycharmProjects\\VideoNavigator_tk")
 from video_navigator import VideoNavigatorApp
 
 class VideoPlayer:
